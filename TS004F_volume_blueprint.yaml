@@ -34,7 +34,7 @@ blueprint:
     volume_scale:
       name: Step Size Scaling
       description: >
-        Multiplier for the volume step. By default (1.0), a rotation distance of 13 equals a 1% volume change.
+        Scales large rotations. A base turn (distance 13) is 1% volume change. Any rotation beyond this is multiplied by this number.
       default: 1.0
       selector:
         number:
