@@ -1,0 +1,120 @@
+blueprint:
+  name: "ZHA - TS004F Knob Volume Control"
+  description: >
+    Control main and secondary media player volumes using a Tuya TS004F knob.
+    
+    * **Rotate:** Adjusts Main Speaker volume.
+    * **Press & Rotate:** Adjusts Secondary Speaker volume.
+  domain: automation
+  input:
+    controller:
+      name: Controller
+      description: The ZHA device creating events.
+      selector:
+        device:
+          integration: zha
+          manufacturer: _TZ3000_qja6nq5z
+          model: TS004F
+    main_speaker:
+      name: Main Speaker
+      description: The main volume controlled with normal left/right rotations.
+      selector:
+        entity:
+          domain: media_player
+    secondary_speaker:
+      name: Secondary Speaker
+      description: The secondary volume controlled with left/right rotations when the knob is pressed down. (Optional)
+      default: ""
+      selector:
+        entity:
+          domain: media_player
+    volume_scale:
+      name: Step Size Scaling
+      description: >
+        Multiplier for the volume step. By default (1.0), a rotation distance of 13 equals a 1% volume change. 
+        A value of 2.0 makes a distance of 13 equal a 2% volume change.
+      default: 1.0
+      selector:
+        number:
+          min: 0.1
+          max: 10.0
+          step: 0.1
+          mode: box
+
+mode: queued
+max: 10
+
+trigger:
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input controller
+
+action:
+  # Map inputs to variables so they can be processed via Jinja2 templates
+  - variables:
+      scale: !input volume_scale
+      main_player: !input main_speaker
+      secondary_player: !input secondary_speaker
+      
+      command: "{{ trigger.event.data.command }}"
+      args: "{{ trigger.event.data.args | default([]) }}"
+      
+      # args[0] is step_mode (direction), args[1] is step_size (distance)
+      step_mode: "{{ args[0] | default(-1) | int }}"
+      step_size: "{{ args[1] | default(0) | float }}"
+      
+      # Formula: (ZHA distance / 13) * 0.01 * Scaling Parameter
+      step_pct: "{{ (step_size / 13.0) * 0.01 * (scale | float) }}"
+
+      # Determine which speaker is being controlled based on the rotation type
+      target_player: >
+        {% if command == 'step' %}
+          {{ main_player }}
+        {% elif command == 'step_color_temp' and secondary_player != '' %}
+          {{ secondary_player }}
+        {% else %}
+          none
+        {% endif %}
+
+      # Determine direction based on Tuya's mapped ZHA clusters
+      # Standard rotate (step): 0 = UP/RIGHT, 1 = DOWN/LEFT
+      # Pressed rotate (step_color_temp): 1 = UP/RIGHT, 3 = DOWN/LEFT
+      direction: >
+        {% if command == 'step' %}
+          {% if step_mode == 0 %} up {% elif step_mode == 1 %} down {% endif %}
+        {% elif command == 'step_color_temp' %}
+          {% if step_mode == 1 %} up {% elif step_mode == 3 %} down {% endif %}
+        {% else %}
+          none
+        {% endif %}
+
+  # Stop automation immediately if the event wasn't a recognized rotation or lacks a target
+  - condition: template
+    value_template: "{{ target_player != 'none' and direction != 'none' and step_pct > 0 }}"
+
+  - variables:
+      current_vol: "{{ state_attr(target_player, 'volume_level') | default(0) | float }}"
+
+  - choose:
+      # --- VOLUME UP ---
+      - conditions:
+          - condition: template
+            value_template: "{{ direction == 'up' }}"
+        sequence:
+          - action: media_player.volume_set
+            target:
+              entity_id: "{{ target_player }}"
+            data:
+              volume_level: "{{ [ current_vol + step_pct, 1.0 ] | min }}"
+              
+      # --- VOLUME DOWN ---
+      - conditions:
+          - condition: template
+            value_template: "{{ direction == 'down' }}"
+        sequence:
+          - action: media_player.volume_set
+            target:
+              entity_id: "{{ target_player }}"
+            data:
+              volume_level: "{{ [ current_vol - step_pct, 0.0 ] | max }}"
