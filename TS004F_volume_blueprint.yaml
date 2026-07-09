@@ -1,10 +1,7 @@
 blueprint:
   name: "ZHA - TS004F Knob Volume Control"
   description: >
-    Control main and secondary media player volumes using a Tuya TS004F knob.
-    
-    * **Rotate:** Adjusts Main Speaker volume.
-    * **Press & Rotate:** Adjusts Secondary Speaker volume.
+    Control main and secondary media player volumes, and toggle play/pause using a Tuya TS004F knob (Dimmer Mode).
   domain: automation
   input:
     controller:
@@ -15,24 +12,29 @@ blueprint:
           integration: zha
           manufacturer: _TZ3000_qja6nq5z
           model: TS004F
-    main_speaker:
-      name: Main Speaker
+    main_volume:
+      name: Main Volume (Speaker)
       description: The main volume controlled with normal left/right rotations.
       selector:
         entity:
           domain: media_player
-    secondary_speaker:
-      name: Secondary Speaker
+    secondary_volume:
+      name: Secondary Volume (Player)
       description: The secondary volume controlled with left/right rotations when the knob is pressed down. (Optional)
       default: ""
+      selector:
+        entity:
+          domain: media_player
+    pause_player:
+      name: Play/Pause Player
+      description: The media player to toggle (play/pause) when the knob is clicked.
       selector:
         entity:
           domain: media_player
     volume_scale:
       name: Step Size Scaling
       description: >
-        Multiplier for the volume step. By default (1.0), a rotation distance of 13 equals a 1% volume change. 
-        A value of 2.0 makes a distance of 13 equal a 2% volume change.
+        Multiplier for the volume step. By default (1.0), a rotation distance of 13 equals a 1% volume change.
       default: 1.0
       selector:
         number:
@@ -52,66 +54,99 @@ trigger:
 
 action:
   - variables:
-      scale: !input volume_scale
-      main_player: !input main_speaker
-      secondary_player: !input secondary_speaker
-      
       command: "{{ trigger.event.data.command }}"
-      
-      step_mode: "{{ trigger.event.data.args[0] | int(-1) if trigger.event.data.args is defined and trigger.event.data.args|length > 0 else -1 }}"
-      step_size: "{{ trigger.event.data.args[1] | float(0) if trigger.event.data.args is defined and trigger.event.data.args|length > 1 else 0 }}"
-      
-      # Formula: (ZHA distance / 13) * 0.01 * Scaling Parameter
-      step_pct: "{{ (step_size / 13.0) * 0.01 * (scale | float(1.0)) }}"
-
-      # Determine which speaker is being controlled based on the rotation type
-      target_player: >
-        {% if command == 'step' %}
-          {{ main_player }}
-        {% elif command == 'step_color_temp' and secondary_player != '' %}
-          {{ secondary_player }}
-        {% else %}
-          none
-        {% endif %}
-
-      # Determine direction based on Tuya's mapped ZHA clusters
-      # Standard rotate (step): 0 = UP/RIGHT, 1 = DOWN/LEFT
-      # Pressed rotate (step_color_temp): 1 = UP/RIGHT, 3 = DOWN/LEFT
-      direction: >
-        {% if command == 'step' %}
-          {% if step_mode == 0 %} up {% elif step_mode == 1 %} down {% endif %}
-        {% elif command == 'step_color_temp' %}
-          {% if step_mode == 1 %} up {% elif step_mode == 3 %} down {% endif %}
-        {% else %}
-          none
-        {% endif %}
-
-  # Stop automation immediately if the event wasn't a recognized rotation or lacks a target
-  - condition: template
-    value_template: "{{ target_player != 'none' and direction != 'none' and step_pct > 0 }}"
-
-  - variables:
-      current_vol: "{{ state_attr(target_player, 'volume_level') | float(0) }}"
 
   - choose:
-      # --- VOLUME UP ---
+      # ========================================
+      # 1. SHORT CLICK (PLAY / PAUSE)
+      # ========================================
       - conditions:
           - condition: template
-            value_template: "{{ direction == 'up' }}"
+            value_template: "{{ command == 'toggle' }}"
         sequence:
-          - action: media_player.volume_set
+          - action: media_player.media_play_pause
             target:
-              entity_id: "{{ target_player }}"
-            data:
-              volume_level: "{{ [ current_vol + step_pct, 1.0 ] | min }}"
+              entity_id: !input pause_player
+
+      # ========================================
+      # 2. STANDARD ROTATION (MAIN SPEAKER)
+      # ========================================
+      - conditions:
+          - condition: template
+            value_template: "{{ command == 'step' }}"
+        sequence:
+          - variables:
+              scale: !input volume_scale
+              player: !input main_volume
+              # Because this sequence only runs on 'step', we know args[0] and args[1] exist safely
+              step_mode: "{{ trigger.event.data.args[0] | int }}"
+              step_size: "{{ trigger.event.data.args[1] | float }}"
+              step_pct: "{{ (step_size / 13.0) * 0.01 * (scale | float) }}"
+              current_vol: "{{ state_attr(player, 'volume_level') | float(0) }}"
               
-      # --- VOLUME DOWN ---
+          - choose:
+              # Rotate Right (UP)
+              - conditions:
+                  - condition: template
+                    value_template: "{{ step_mode == 0 }}"
+                sequence:
+                  - action: media_player.volume_set
+                    target:
+                      entity_id: "{{ player }}"
+                    data:
+                      volume_level: "{{ [ current_vol + step_pct, 1.0 ] | min }}"
+                      
+              # Rotate Left (DOWN)
+              - conditions:
+                  - condition: template
+                    value_template: "{{ step_mode == 1 }}"
+                sequence:
+                  - action: media_player.volume_set
+                    target:
+                      entity_id: "{{ player }}"
+                    data:
+                      volume_level: "{{ [ current_vol - step_pct, 0.0 ] | max }}"
+
+      # ========================================
+      # 3. PRESSED ROTATION (SECONDARY SPEAKER)
+      # ========================================
       - conditions:
           - condition: template
-            value_template: "{{ direction == 'down' }}"
+            value_template: "{{ command == 'step_color_temp' }}"
         sequence:
-          - action: media_player.volume_set
-            target:
-              entity_id: "{{ target_player }}"
-            data:
-              volume_level: "{{ [ current_vol - step_pct, 0.0 ] | max }}"
+          - variables:
+              player: !input secondary_volume
+              
+          # Abort if no secondary speaker was defined in the UI
+          - condition: template
+            value_template: "{{ player != '' }}"
+            
+          - variables:
+              scale: !input volume_scale
+              step_mode: "{{ trigger.event.data.args[0] | int }}"
+              step_size: "{{ trigger.event.data.args[1] | float }}"
+              step_pct: "{{ (step_size / 18.0) * 0.01 * (scale | float) }}"
+              current_vol: "{{ state_attr(player, 'volume_level') | float(0) }}"
+              
+          - choose:
+              # Press & Rotate Right (UP)
+              - conditions:
+                  - condition: template
+                    value_template: "{{ step_mode == 1 }}"
+                sequence:
+                  - action: media_player.volume_set
+                    target:
+                      entity_id: "{{ player }}"
+                    data:
+                      volume_level: "{{ [ current_vol + step_pct, 1.0 ] | min }}"
+                      
+              # Press & Rotate Left (DOWN)
+              - conditions:
+                  - condition: template
+                    value_template: "{{ step_mode == 3 }}"
+                sequence:
+                  - action: media_player.volume_set
+                    target:
+                      entity_id: "{{ player }}"
+                    data:
+                      volume_level: "{{ [ current_vol - step_pct, 0.0 ] | max }}"
