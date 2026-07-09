@@ -9,9 +9,10 @@ This blueprint allows you to easily bind a Tuya TS004F wireless rotary knob (com
 
 ## ✨ Features
 
-* **Standard Rotation:** Controls the volume of your Main Speaker.
-* **Pressed Rotation:** Controls the volume of an optional Secondary Speaker.
-* **Adjustable Sensitivity:** Includes a scaling parameter to easily fine-tune how much the volume changes per click of the dial.
+* **Short Click:** Toggles play/pause for a designated media player.
+* **Standard Rotation:** Controls the volume of your main speaker.
+* **Pressed Rotation:** Controls the volume of an optional secondary speaker.
+* **Smart Acceleration:** Slow, deliberate turns provide precise 1% volume adjustments. Fast spins multiply the excess distance to allow for rapid volume changes.
 * **Safety Limits:** Built-in math caps the volume at 100% and floors it at 0% to prevent Home Assistant API errors.
 
 ## 📋 Prerequisites
@@ -19,6 +20,7 @@ This blueprint allows you to easily bind a Tuya TS004F wireless rotary knob (com
 1. **Home Assistant** (Core)
 2. **ZHA (Zigbee Home Automation)** integration active and running.
 3. A paired **Tuya TS004F** device (Manufacturer: `_TZ3000_qja6nq5z`).
+4. Tuya knob must be in **Dimmer Mode** for the rotation events to function correctly (tripple click to switch modes).
 
 ## 🚀 Installation
 
@@ -36,15 +38,17 @@ When creating an automation from this blueprint, you will be prompted to configu
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
 | **Controller** | Required | The Tuya TS004F device in your ZHA integration generating the events. |
-| **Main Speaker** | Required | The `media_player` entity you want to control with standard left/right rotations. |
-| **Secondary Speaker** | Optional | The `media_player` entity you want to control when pressing down and rotating the knob. |
-| **Step Size Scaling** | Required | A multiplier for the volume step. By default (`1.0`), a physical rotation distance of 13 equates to a 1% volume change. Increase this number (e.g., `2.0` or `5.0`) to make the volume change faster with less turning. |
+| **Main Volume (Speaker)** | Required | The `media_player` entity you want to control with standard left/right rotations. |
+| **Secondary Volume (Player)** | Optional | The `media_player` entity you want to control when pressing down and rotating the knob. |
+| **Play/Pause Player** | Required | The `media_player` entity to toggle (play/pause) when the knob is short-clicked. |
+| **Acceleration Multiplier** | Required | Scales large rotations. A standard base turn is always exactly a 1% volume change. Any rotation distance *beyond* the base turn is multiplied by this number. |
 
 ## 🛠️ How it Works under the Hood
 
 Unlike standard UI device triggers that strip away Zigbee parameters, this blueprint listens directly to the `zha_event` bus. 
-* It intercepts the `step` command for standard rotation and the `step_color_temp` command for pressed rotation. 
-* It extracts the `step_mode` (direction) and `step_size` (distance), applies your custom scaling fraction, and safely pushes the new volume state to your target media player.
+* It intercepts the physical action and routes it to one of three independent sequences: `toggle`, `step` (rotate), or `step_color_temp` (press & rotate).
+* For rotations, it extracts the `step_mode` (direction) and `step_size` (distance). 
+* It applies a piecewise template to the distance, separating the base turn from the excess speed, applies your custom scaling fraction, and safely pushes the new volume state to your target media player.
 
 ## 📄 License
 
