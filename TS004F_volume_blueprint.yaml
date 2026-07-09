@@ -81,7 +81,11 @@ action:
               # Because this sequence only runs on 'step', we know args[0] and args[1] exist safely
               step_mode: "{{ trigger.event.data.args[0] | int }}"
               step_size: "{{ trigger.event.data.args[1] | float }}"
-              step_pct: "{{ (step_size / 13.0) * 0.01 * (scale | float) }}"
+              # ACCELERATION MATH. Cap base at 13, floor excess at 0
+              step_pct: >
+                {% set base = [step_size, 13.0] | min %}
+                {% set excess = [step_size - 13.0, 0.0] | max %}
+                {{ ((base / 13.0) * 0.01) + ((excess / 13.0) * 0.01 * (scale | float)) }}
               current_vol: "{{ state_attr(player, 'volume_level') | float(0) }}"
               
           - choose:
@@ -125,7 +129,11 @@ action:
               scale: !input volume_scale
               step_mode: "{{ trigger.event.data.args[0] | int }}"
               step_size: "{{ trigger.event.data.args[1] | float }}"
-              step_pct: "{{ (step_size / 18.0) * 0.01 * (scale | float) }}"
+              # ACCELERATION MATH. Cap base at 13, floor excess at 0
+              step_pct: >
+                {% set base = [step_size, 18.0] | min %}
+                {% set excess = [step_size - 18.0, 0.0] | max %}
+                {{ ((base / 18.0) * 0.01) + ((excess / 18.0) * 0.01 * (scale | float)) }}
               current_vol: "{{ state_attr(player, 'volume_level') | float(0) }}"
               
           - choose:
