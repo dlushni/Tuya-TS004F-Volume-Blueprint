@@ -51,21 +51,18 @@ trigger:
       device_id: !input controller
 
 action:
-  # Map inputs to variables so they can be processed via Jinja2 templates
   - variables:
       scale: !input volume_scale
       main_player: !input main_speaker
       secondary_player: !input secondary_speaker
       
       command: "{{ trigger.event.data.command }}"
-      args: "{{ trigger.event.data.args | default([]) }}"
       
-      # args[0] is step_mode (direction), args[1] is step_size (distance)
-      step_mode: "{{ args[0] | default(-1) | int }}"
-      step_size: "{{ args[1] | default(0) | float }}"
+      step_mode: "{{ trigger.event.data.args[0] | int(-1) if trigger.event.data.args is defined and trigger.event.data.args|length > 0 else -1 }}"
+      step_size: "{{ trigger.event.data.args[1] | float(0) if trigger.event.data.args is defined and trigger.event.data.args|length > 1 else 0 }}"
       
       # Formula: (ZHA distance / 13) * 0.01 * Scaling Parameter
-      step_pct: "{{ (step_size / 13.0) * 0.01 * (scale | float) }}"
+      step_pct: "{{ (step_size / 13.0) * 0.01 * (scale | float(1.0)) }}"
 
       # Determine which speaker is being controlled based on the rotation type
       target_player: >
@@ -94,7 +91,7 @@ action:
     value_template: "{{ target_player != 'none' and direction != 'none' and step_pct > 0 }}"
 
   - variables:
-      current_vol: "{{ state_attr(target_player, 'volume_level') | default(0) | float }}"
+      current_vol: "{{ state_attr(target_player, 'volume_level') | float(0) }}"
 
   - choose:
       # --- VOLUME UP ---
